@@ -5,6 +5,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "geometry_msgs/msg/twist_stamped.hpp"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -25,10 +26,16 @@ MainWindow::~MainWindow()
 void MainWindow::set_node_handle(rclcpp::Node::SharedPtr nh)
 {
     node_handle = nh;
-    publisher = nh->create_publisher<geometry_msgs::msg::Twist>(topic.toStdString(), 10);
+    publisher = nh->create_publisher<msgType>(topic.toStdString(), 10);
     connect(publish_timer, &QTimer::timeout, this, &MainWindow::timer_callback);
     publish_timer->start(publish_rate_ms);
     this->print("Topic set to: " + topic + '\n');
+    
+    #ifdef STAMPED
+        this->print("Message type: TwistStamped\n");
+    #else
+        this->print("Message type: Twist\n");
+    #endif
 }
 
 void MainWindow::on_topicSet_clicked()
@@ -41,7 +48,7 @@ void MainWindow::on_topicSet_clicked()
     // re-create publisher with new topic
     publish_timer->stop();
     publisher.reset();
-    publisher = node_handle->create_publisher<geometry_msgs::msg::Twist>(topic.toStdString(), 10);
+    publisher = node_handle->create_publisher<msgType>(topic.toStdString(), 10);
     publish_timer->start(publish_rate_ms);
 
 }
@@ -58,10 +65,7 @@ void MainWindow::print(QString s)
 void MainWindow::on_zeroButton_clicked()
 {   
     // publish zero immediately
-    geometry_msgs::msg::Twist zeroMsg;
-    zeroMsg.linear.x = 0.0;
-    zeroMsg.angular.z = 0.0;
-    publisher->publish(zeroMsg);
+    this->publish_cmd(0, 0);
 
     // zero slider values
     ui->linearInput->setValue(0);
@@ -81,14 +85,26 @@ void MainWindow::timer_callback()
     if (ang_z > 0) ang_z /= ui->angularInput->maximum();
     else ang_z /= -ui->angularInput->minimum();
     
-    // publish it
-    geometry_msgs::msg::Twist msg;
-    msg.linear.x = lin_x;
-    msg.angular.z = ang_z;
-    publisher->publish(msg);
+    // publish it, adding time and frame_id if it's a twist stamped message
+    this->publish_cmd(lin_x, ang_z);
 
     // update GUI labels
-    ui->labelSpeed->setText("Speed: " + QString::number(msg.linear.x));
-    ui->labelSteering->setText("Steering: " + QString::number(msg.angular.z));
+    ui->labelSpeed->setText("Speed: " + QString::number(lin_x));
+    ui->labelSteering->setText("Steering: " + QString::number(ang_z));
 }
 
+void MainWindow::publish_cmd(float lin_x, float ang_z)
+{
+    msgType msg;
+    #ifdef STAMPED
+        msg.header.stamp = node_handle->get_clock()->now();
+        msg.header.frame_id = "base_link";
+        msg.twist.linear.x = lin_x;
+        msg.twist.angular.z = ang_z;
+    #else
+        msg.linear.x = lin_x;
+        msg.angular.z = ang_z;
+    #endif
+        
+    publisher->publish(msg);
+}
